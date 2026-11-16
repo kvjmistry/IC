@@ -52,6 +52,7 @@ from .  components import hits_corrector
 from .  components import hits_thresholder
 from .  components import compute_and_write_tracks_info
 from .  components import identity
+from .  components import      hits_clusterizer
 
 from .. io.         hits_io import hits_writer as hits_writer_
 from .. io.         kdst_io import kdst_from_df_writer
@@ -67,19 +68,27 @@ def hit_dropper(radius : float):
 
     return drop_hits
 
+
+def isolated_dropper():
+    def drop_isolated(hits : pd.DataFrame) -> pd.DataFrame:
+        return hits.loc[hits.cluster != -1].reset_index(drop=True)
+    return drop_isolated
+
+
 @city
-def esmeralda( files_in         : OneOrManyFiles
-             , file_out         : str
-             , compression      : str
-             , event_range      : EventRangeType
-             , print_mod        : int
-             , detector_db      : str
-             , run_number       : int
-             , threshold        : float
-             , same_peak        : bool
-             , fiducial_r       : float
-             , paolina_params   : dict
-             , corrections      : Optional[dict] = None
+def esmeralda( files_in           : OneOrManyFiles
+             , file_out           : str
+             , compression        : str
+             , event_range        : EventRangeType
+             , print_mod          : int
+             , detector_db        : str
+             , run_number         : int
+             , threshold          : float
+             , same_peak          : bool
+             , fiducial_r         : float
+             , paolina_params     : dict
+             , corrections        : Optional[dict] = None
+             , clustering_params  : Optional[dict] = None
              ):
     """
     The city applies a threshold to sipm hits and extracts
@@ -149,8 +158,11 @@ def esmeralda( files_in         : OneOrManyFiles
     """
     correct_hits       = hits_corrector(**corrections) if corrections is not None else identity
     correct_hits       = fl.map(correct_hits, item="hits")
+    cluster_hits       = fl.map( hits_clusterizer(**clustering_params) if clustering_params is not None else identity
+                               , item = "hits")
     drop_external_hits = fl.map(hit_dropper(fiducial_r), item="hits")
     threshold_hits     = fl.map(hits_thresholder(threshold, same_peak), item="hits")
+    drop_isolated_hits = fl.map(isolated_dropper(), item="hits")
     event_count_in     = fl.spy_count()
     event_count_out    = fl.count()
 
@@ -181,6 +193,8 @@ def esmeralda( files_in         : OneOrManyFiles
                                    , correct_hits
                                    , drop_external_hits
                                    , threshold_hits
+                                   , cluster_hits
+                                   , drop_isolated_hits
                                    , fl.fork( compute_tracks
                                             , write_kdst
                                             , write_event_info
